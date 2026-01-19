@@ -6,11 +6,22 @@ set -e
 
 cd "$(dirname "$0")"
 
-# Get project name from parent folder
-PROJECT_NAME=$(basename "$(dirname "$(pwd)")")
+# Create .env from .env.example if not exists
+if [ ! -f ".env" ]; then
+    cp .env.example .env
+    echo "Created .env from .env.example"
+fi
+
+# Load environment variables
+source .env
+
+# Set defaults
+BASE_DOMAIN=${BASE_DOMAIN:-$(basename "$(dirname "$(pwd)")")}
+FRONTEND_PORT=${FRONTEND_PORT:-3000}
 
 echo "Stack: Laravel + Next.js"
-echo "Project: $PROJECT_NAME"
+echo "Domain: $BASE_DOMAIN"
+echo "Frontend Port: $FRONTEND_PORT"
 echo ""
 
 # Step 1: Install dependencies
@@ -142,20 +153,20 @@ APP_NAME=Service
 APP_KEY=
 APP_ENV=local
 APP_DEBUG=true
-APP_URL=https://api.$PROJECT_NAME.test
-FRONTEND_URL=https://$PROJECT_NAME.test
+APP_URL=https://api.$BASE_DOMAIN.test
+FRONTEND_URL=https://$BASE_DOMAIN.test
 
 DB_CONNECTION=sqlite
 
 SESSION_DRIVER=cookie
-SESSION_DOMAIN=.$PROJECT_NAME.test
+SESSION_DOMAIN=.$BASE_DOMAIN.test
 SESSION_SAME_SITE=none
 SESSION_SECURE_COOKIE=true
 
-SANCTUM_STATEFUL_DOMAINS=$PROJECT_NAME.test,api.$PROJECT_NAME.test
+SANCTUM_STATEFUL_DOMAINS=$BASE_DOMAIN.test,api.$BASE_DOMAIN.test
 
 # SSO Configuration
-SSO_CONSOLE_URL=https://auth-$PROJECT_NAME.test
+SSO_CONSOLE_URL=https://auth-$BASE_DOMAIN.test
 SSO_SERVICE_SLUG=service
 SSO_SERVICE_SECRET=local_dev_secret
 EOF
@@ -166,10 +177,10 @@ php artisan key:generate --force
 php artisan vendor:publish --tag=sso-client-config --force 2>/dev/null || true
 echo "✓ Environment configured"
 
-# Step 3: Link backend to Herd
-herd link api.$PROJECT_NAME
-herd secure api.$PROJECT_NAME
-echo "✓ https://api.$PROJECT_NAME.test"
+# Step 4: Link backend to Herd
+herd link api.$BASE_DOMAIN
+herd secure api.$BASE_DOMAIN
+echo "✓ https://api.$BASE_DOMAIN.test"
 
 # Step 4: Create Next.js frontend
 echo ""
@@ -189,8 +200,8 @@ if [ ! -d "frontend" ]; then
     
     # Create .env.local
     cat > frontend/.env.local << EOF
-NEXT_PUBLIC_API_URL=https://api.$PROJECT_NAME.test
-NEXT_PUBLIC_SSO_URL=https://auth-$PROJECT_NAME.test
+NEXT_PUBLIC_API_URL=https://api.$BASE_DOMAIN.test
+NEXT_PUBLIC_SSO_URL=https://auth-$BASE_DOMAIN.test
 EOF
     
     # Install local React packages
@@ -200,11 +211,11 @@ EOF
 fi
 echo "✓ frontend"
 
-# Step 5: Proxy frontend to port 3000
-herd proxy $PROJECT_NAME http://localhost:3000 --secure
-echo "✓ https://$PROJECT_NAME.test → localhost:3000"
+# Step 5: Proxy frontend
+herd proxy $BASE_DOMAIN http://localhost:$FRONTEND_PORT --secure
+echo "✓ https://$BASE_DOMAIN.test → localhost:$FRONTEND_PORT"
 
 echo ""
 echo "Done!"
-echo "  API:      https://api.$PROJECT_NAME.test"
-echo "  Frontend: https://$PROJECT_NAME.test (run: cd frontend && pnpm dev)"
+echo "  API:      https://api.$BASE_DOMAIN.test"
+echo "  Frontend: https://$BASE_DOMAIN.test (run: cd frontend && pnpm dev -p $FRONTEND_PORT)"
