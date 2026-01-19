@@ -6,6 +6,12 @@ set -e
 
 cd "$(dirname "$0")"
 
+# Parse arguments
+FORCE_CONFIG=false
+if [ "$1" = "--force" ] || [ "$1" = "-f" ]; then
+    FORCE_CONFIG=true
+fi
+
 # Create .env from .env.example if not exists
 if [ ! -f ".env" ]; then
     cp .env.example .env
@@ -22,7 +28,90 @@ FRONTEND_PORT=${FRONTEND_PORT:-3000}
 echo "Stack: Laravel + Next.js"
 echo "Domain: $BASE_DOMAIN"
 echo "Frontend Port: $FRONTEND_PORT"
+if [ "$FORCE_CONFIG" = true ]; then
+    echo "Mode: --force (config only)"
+fi
 echo ""
+
+# ============================================================
+# Function: Update config files only
+# ============================================================
+update_config() {
+    echo "Updating configuration files..."
+    
+    # Backend .env
+    if [ -d "backend" ]; then
+        # Preserve APP_KEY
+        APP_KEY=$(grep "^APP_KEY=" backend/.env 2>/dev/null | cut -d'=' -f2 || echo "")
+        
+        cat > backend/.env << EOF
+APP_NAME=Service
+APP_KEY=$APP_KEY
+APP_ENV=local
+APP_DEBUG=true
+APP_URL=https://api.$BASE_DOMAIN.test
+FRONTEND_URL=https://$BASE_DOMAIN.test
+
+DB_CONNECTION=sqlite
+
+SESSION_DRIVER=cookie
+SESSION_DOMAIN=.$BASE_DOMAIN.test
+SESSION_SAME_SITE=none
+SESSION_SECURE_COOKIE=true
+
+SANCTUM_STATEFUL_DOMAINS=$BASE_DOMAIN.test,api.$BASE_DOMAIN.test
+
+# SSO Configuration
+SSO_CONSOLE_URL=https://auth-$BASE_DOMAIN.test
+SSO_SERVICE_SLUG=service
+SSO_SERVICE_SECRET=local_dev_secret
+EOF
+        echo "✓ backend/.env"
+        
+        # Generate key if empty
+        if [ -z "$APP_KEY" ]; then
+            cd backend && php artisan key:generate --force && cd ..
+        fi
+    fi
+    
+    # Frontend .env.local
+    if [ -d "frontend" ]; then
+        cat > frontend/.env.local << EOF
+NEXT_PUBLIC_API_URL=https://api.$BASE_DOMAIN.test
+NEXT_PUBLIC_SSO_URL=https://auth-$BASE_DOMAIN.test
+EOF
+        echo "✓ frontend/.env.local"
+    fi
+    
+    # Herd links
+    if [ -d "backend" ]; then
+        cd backend
+        herd link api.$BASE_DOMAIN
+        herd secure api.$BASE_DOMAIN
+        echo "✓ https://api.$BASE_DOMAIN.test"
+        cd ..
+    fi
+    
+    herd proxy $BASE_DOMAIN http://localhost:$FRONTEND_PORT --secure
+    echo "✓ https://$BASE_DOMAIN.test → localhost:$FRONTEND_PORT"
+    
+    echo ""
+    echo "Config updated!"
+    echo "  API:      https://api.$BASE_DOMAIN.test"
+    echo "  Frontend: https://$BASE_DOMAIN.test (run: cd frontend && pnpm dev -p $FRONTEND_PORT)"
+}
+
+# ============================================================
+# Force mode: only update config
+# ============================================================
+if [ "$FORCE_CONFIG" = true ]; then
+    update_config
+    exit 0
+fi
+
+# ============================================================
+# Full setup
+# ============================================================
 
 # Step 1: Install dependencies
 echo "Step 1: Install dependencies"
@@ -182,9 +271,9 @@ herd link api.$BASE_DOMAIN
 herd secure api.$BASE_DOMAIN
 echo "✓ https://api.$BASE_DOMAIN.test"
 
-# Step 4: Create Next.js frontend
+# Step 5: Create Next.js frontend
 echo ""
-echo "Step 3: Create frontend"
+echo "Step 4: Create frontend"
 cd ..
 if [ ! -d "frontend" ]; then
     npx --yes create-next-app@latest frontend \
@@ -211,7 +300,7 @@ EOF
 fi
 echo "✓ frontend"
 
-# Step 5: Proxy frontend
+# Step 6: Proxy frontend
 herd proxy $BASE_DOMAIN http://localhost:$FRONTEND_PORT --secure
 echo "✓ https://$BASE_DOMAIN.test → localhost:$FRONTEND_PORT"
 
